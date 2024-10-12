@@ -1,0 +1,4 @@
+.env
+discord-dm-bot/
+.DS_Store
+test.py
