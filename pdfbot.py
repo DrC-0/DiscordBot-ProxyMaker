@@ -49,8 +49,8 @@ async def pdfmake(ctx, url: str):
   await ctx.send("生成中です")
   pg.pdfgene(url=url)
   await ctx.send(file=discord.File(pg.pdf_name))
+  await ctx.send(f"{ctx.author.mention} 生成完了しました")
   pg.rmpdf()
-
 
 pg.rmpics()
 pg.rmpdf()

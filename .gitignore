@@ -2,3 +2,5 @@
 discord-dm-bot/
 .DS_Store
 test.py
+__pycache__/
+*.pdf
