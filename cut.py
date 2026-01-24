@@ -1,7 +1,7 @@
 from pypdf import PdfReader, PdfWriter
 
 file_name = "artifact.pdf"
-def extract_pages(input_path, output_path, pages_to_extract):
+def extract_pages(input_path, pages_to_extract):
     reader = PdfReader(input_path)
     writer = PdfWriter()
 
@@ -11,9 +11,11 @@ def extract_pages(input_path, output_path, pages_to_extract):
         else:
             print(f"スキップ: {page_num} は範囲外です（全{len(reader.pages)}ページ）")
 
-    with open(output_path, "wb") as f:
+    with open(input_path, "wb") as f:
         writer.write(f)
-    print(f"{output_path} に {len(pages_to_extract)} ページを書き出しました")
+    print(f"{input_path} に {len(pages_to_extract)} ページを書き出しました")
 
+def cut_tail(path, num):
+    extract_pages(path, list(range(1, num+1)))
 # 使用例
-extract_pages(file_name,file_name, [1, 2])
+#extract_pages(file_name, [1, 2, 3, 4])
