@@ -1,0 +1,13 @@
+[project]
+name = "deckmakerdiscord"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "discord-py>=2.6.4",
+    "opencv-python>=4.13.0.92",
+    "python-dotenv>=1.2.1",
+    "reportlab>=4.4.10",
+    "requests>=2.32.5",
+]

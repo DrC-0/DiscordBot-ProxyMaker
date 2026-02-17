@@ -1,175 +1,197 @@
+from io import BytesIO
+from urllib.parse import urlparse, parse_qs
+import requests
+import cv2
+import numpy as np
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A4, portrait
 from reportlab.lib.utils import ImageReader
-import requests, os, cv2, numpy as np
 from PIL import Image
-from io import BytesIO
-import requests
-from urllib.parse import urlparse, parse_qs
 
-margin = 0
-margin_tp = 15
-pics_folder_path = './pics'
-pdf_name = "artifact.pdf"
-CARDHIGHT = 88
-CARDWIDTH = 63
-card_h = CARDHIGHT
-card_w = CARDWIDTH
-comp_ratio = 100
+# 定数
+MARGIN = 0
+MARGIN_TOP = 10
+CARD_HEIGHT = 88
+CARD_WIDTH = 63
+COMP_RATIO = 100
 API_BASE_URL = "https://ockvhiwjud.execute-api.ap-northeast-1.amazonaws.com/prod/proxy/dm-decks/public/"
 IMAGE_BASE_URL = "https://storage.googleapis.com/ka-nabell-card-images/img/card/"
 
-def height(i):
-  n = i // 3 + 1
-  return 297 - margin_tp - (n * (card_h + margin))
+
+def height(i: int) -> int:
+    n = i // 3 + 1
+    return 297 - MARGIN_TOP - (n * (CARD_HEIGHT + MARGIN))
 
 
-def width(i):
-  n = i % 3
-  return margin_tp + (n * card_w)
-
-def getHFromW(w):
-  return CARDWIDTH * w / CARDHIGHT
+def width(i: int) -> int:
+    n = i % 3
+    return MARGIN_TOP + (n * CARD_WIDTH)
 
 
-def getWFromH(h):
-  return CARDHIGHT * h / CARDWIDTH
+def get_h_from_w(w: int) -> float:
+    return CARD_WIDTH * w / CARD_HEIGHT
 
-def byte2cv2img(byte_data):
-  nparr = np.frombuffer(byte_data, np.uint8)
-  img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-  return img
 
-def cv2img2pil(cv_img):
-  rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-  pil_img = Image.fromarray(rgb_img)
-  return pil_img
+def get_w_from_h(h: int) -> float:
+    return CARD_HEIGHT * h / CARD_WIDTH
 
-def compress_image(pil_img, quality=comp_ratio):
+
+def byte_to_cv2_img(byte_data: bytes) -> np.ndarray:
+    nparr = np.frombuffer(byte_data, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    return img
+
+
+def cv2_img_to_pil_img(cv2_img: np.ndarray) -> Image.Image:
+    rgb_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb_img)
+    return pil_img
+
+
+def compress_image(pil_img: Image.Image, quality: int = COMP_RATIO) -> ImageReader:
     buffer = BytesIO()
     pil_img.save(buffer, format="JPEG", quality=quality, optimize=True)
     buffer.seek(0)
     return ImageReader(buffer)
 
-def crop(image): #引数は画像の相対パス
-  # 画像の読み込み
-  img = byte2cv2img(image)
 
-  # Grayscale に変換
-  gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+def crop_img(image: bytes) -> ImageReader:  # 引数は画像のバイトデータ
+    # 画像の読み込み
+    img = byte_to_cv2_img(image)
+    # Grayscale に変換
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 色空間を二値化
+    binary_img = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)[1]
+    # 輪郭を抽出
+    contours = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
+    # 輪郭の座標をリストに代入していく
+    x1 = []  # x座標の最小値
+    y1 = []  # y座標の最小値
+    x2 = []  # x座標の最大値
+    y2 = []  # y座標の最大値
+    for i in range(
+        1, len(contours)
+    ):  # i = 1 は画像全体の外枠になるのでカウントに入れない
+        ret = cv2.boundingRect(contours[i])
+        x1.append(ret[0])
+        y1.append(ret[1])
+        x2.append(ret[0] + ret[2])
+        y2.append(ret[1] + ret[3])
+    # 輪郭の一番外枠を切り抜き
+    x1_min = min(x1)
+    y1_min = min(y1)
+    x2_max = max(x2)
+    y2_max = max(y2)
+    # 切り抜いた画像をPIL形式に変換して圧縮したものを返す
+    cropped_img = img[y1_min:y2_max, x1_min:x2_max]
+    pil_img = cv2_img_to_pil_img(cropped_img)
+    return compress_image(pil_img)
 
-  # 色空間を二値化
-  img2 = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)[1]
 
-  # 輪郭を抽出
-  contours = cv2.findContours(img2, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
+def get_deck_id(url: str) -> str | None:
+    # URLからデッキIDを取得する
+    try:
+        query = urlparse(url).query
+        params = parse_qs(query)
+        return params.get("tcgrevo_deck_maker_deck_id", [None])[0]
+    except Exception:
+        return None
 
-  # 輪郭の座標をリストに代入していく
-  x1 = [] #x座標の最小値
-  y1 = [] #y座標の最小値
-  x2 = [] #x座標の最大値
-  y2 = [] #y座標の最大値
-  for i in range(1, len(contours)):# i = 1 は画像全体の外枠になるのでカウントに入れない
-      ret = cv2.boundingRect(contours[i])
-      x1.append(ret[0])
-      y1.append(ret[1])
-      x2.append(ret[0] + ret[2])
-      y2.append(ret[1] + ret[3])
 
-  # 輪郭の一番外枠を切り抜き
-  x1_min = min(x1)
-  y1_min = min(y1)
-  x2_max = max(x2)
-  y2_max = max(y2)
+def get_json_data(deck_id: str) -> dict | None:
+    # デッキIDからデッキデータを取得する
+    api_url = f"{API_BASE_URL}{deck_id}"
+    try:
+        res = requests.get(api_url, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except Exception:
+        return None
 
-  cropped_img = img[y1_min:y2_max, x1_min:x2_max]
-  return cv2img2pil(cropped_img)
 
-def getDeckId(url) -> str | None:
-  """URLからデッキIDを取得する"""
-  try:
-    query = urlparse(url).query
-    params = parse_qs(query)
-    return params.get('tcgrevo_deck_maker_deck_id', [None])[0]
-  except Exception:
-    return None
+def get_image_url(id_url: str) -> str:
+    # カードIDから画像URLを取得する
+    return IMAGE_BASE_URL + id_url
 
-def getJsonData(deck_id) -> dict | None:
-  """デッキIDからデッキデータを取得する"""
-  api_url = f"{API_BASE_URL}{deck_id}"
-  try:
-    res = requests.get(api_url, timeout=10)
-    res.raise_for_status()
-    return res.json()
-  except Exception:
-    return None
 
-def getImageUrl(id_url: str) -> str:
-  """カードIDから画像URLを取得する"""
-  return IMAGE_BASE_URL + id_url
+def get_image_urls_from_json(card_infos: list) -> list[str]:
+    # デッキデータから画像URLリストを取得する
+    card_urls = []
+    for card in card_infos:
+        img_url = card.get("large_image_url")
+        if img_url:
+            card_urls.append(get_image_url(img_url))
+    return card_urls
 
-def getImageUrlsFromJson(card_infos: list) -> list[str]:
-  """デッキデータから画像URLリストを取得する"""
-  card_urls = []
-  for card in card_infos:
-    img_url = card.get("large_image_url")
-    if img_url:
-      card_urls.append(getImageUrl(img_url))
-  return card_urls
 
-def getImageUrlList(deck_url: str) -> tuple | None:
-  """デッキURLから画像URLリストを取得する"""
-  deck_id = getDeckId(deck_url)
-  if not deck_id:
-    return None
-  data = getJsonData(deck_id)
-  if not data:
-    return None
-  main_cards = data.get("dmDeck", {}).get("main_cards", [])
-  gr_cards = data.get("dmDeck", {}).get("gr_cards", [])
-  extra_cards = data.get("dmDeck", {}).get("hyper_spatial_cards", [])
-  if not main_cards:
-    return None
-  return getImageUrlsFromJson(main_cards), getImageUrlsFromJson(gr_cards), getImageUrlsFromJson(extra_cards)
+def get_image_url_list(deck_url: str) -> tuple | None:
+    # デッキURLから画像URLリストを取得する
+    deck_id = get_deck_id(deck_url)
+    if not deck_id:
+        return None
+    data = get_json_data(deck_id)
+    if not data:
+        return None
+    main_cards = data.get("dmDeck", {}).get("main_cards", [])
+    gr_cards = data.get("dmDeck", {}).get("gr_cards", [])
+    extra_cards = data.get("dmDeck", {}).get("hyper_spatial_cards", [])
+    if not main_cards:
+        return None
+    return (
+        get_image_urls_from_json(main_cards),
+        get_image_urls_from_json(gr_cards),
+        get_image_urls_from_json(extra_cards),
+    )
 
-def make_pdf_from_images(image_urls: list):
-  page = canvas.Canvas(pdf_name, pagesize=portrait(A4))
 
-  for i in range(0, len(image_urls), 9):
-    for j in range(9):
-      if i + j < len(image_urls):
-        page.drawImage(image_urls[i + j], width(j) * mm, height(j) * mm, card_w * mm, card_h * mm)
-    page.showPage()
-  
-  return page
+def make_pdf_binary_from_images(image_urls: list) -> BytesIO:
+    buffer = BytesIO()
+    page = canvas.Canvas(buffer, pagesize=portrait(A4))
 
-def pdfgene(url):
-  #画像URLリストの取得    
-  print("get image urls")
-  main_cards, gr_cards, extra_cards = getImageUrlList(url)
-  adextra_cards = []
-  for card in extra_cards:
-      for i in range(1,4):
-          adextra_cards.append(card.split("_")[0] + "_" + str(i+1) + ".jpg")
-  srcs = main_cards + gr_cards + extra_cards + adextra_cards
+    for i in range(0, len(image_urls), 9):
+        for j in range(9):
+            if i + j < len(image_urls):
+                page.drawImage(
+                    image_urls[i + j],
+                    width(j) * mm,
+                    height(j) * mm,
+                    CARD_WIDTH * mm,
+                    CARD_HEIGHT * mm,
+                )
+        page.showPage()
+    page.save()
+    buffer.seek(0)
+    return buffer
 
-  #画像のダウンロード
-  print("download images")
-  imgs = []
-  for src in srcs:
-    r = requests.get(src)
-    if r.status_code == 200:
-      cropped_img = crop(r.content)
-      imgs.append(compress_image(cropped_img))
 
-  #pdf作成と画像追加
-  print("make pdf")
-
-  page = make_pdf_from_images(imgs)
-  page.save()
-  print("complete")
-
-def rmpdf():
-  if (os.path.isfile(pdf_name)):
-    os.remove(pdf_name)
+def generate_pdf_binary(url, ngr_option=False, nsp_option=False) -> BytesIO:
+    # 画像URLリストの取得
+    print("get image urls")
+    main_cards, gr_cards, extra_cards = get_image_url_list(url)
+    advance_extra_cards = []
+    if not nsp_option:
+        for card in extra_cards:
+            for i in range(1, 4):
+                advance_extra_cards.append(
+                    card.split("_")[0] + "_" + str(i + 1) + ".jpg"
+                )
+    # オプションの適用
+    srcs = main_cards
+    if not ngr_option:
+        srcs += gr_cards
+    if not nsp_option:
+        srcs += extra_cards
+        srcs += advance_extra_cards
+    # 画像のダウンロード
+    print("download images")
+    imgs = []
+    for src in srcs:
+        r = requests.get(src)
+        if r.status_code == 200:
+            imgs.append(crop_img(r.content))
+    # pdf作成と画像追加
+    print("make pdf")
+    page = make_pdf_binary_from_images(imgs)
+    print("complete")
+    return page
